@@ -62,52 +62,129 @@ const dbAnalytics = new sqlite3.Database(analyticsDbPath, (err) => {
     } else {
         console.log('Database connected:', analyticsDbPath);
         dbAnalytics.run(`
-            CREATE TABLE IF NOT EXISTS analytics (
-                video_id TEXT PRIMARY KEY UNIQUE,
+            CREATE TABLE IF NOT EXISTS analytics_views (
+                video_id TEXT UNIQUE,
+                time_published NUMBER,
                 channel_id TEXT
             )
         `, (err) => {
             if (err) {
                 console.error('Error creating table', err);
             } else {
-                console.log('Table "analytics" is ready');
+                console.log('Table "analytics_views" is ready');
+            }
+        });
+        dbAnalytics.run(`
+            CREATE TABLE IF NOT EXISTS analytics_likes (
+                video_id TEXT UNIQUE
+            )
+        `, (err) => {
+            if (err) {
+                console.error('Error creating table', err);
+            } else {
+                console.log('Table "analytics_likes" is ready');
+            }
+        });
+        dbAnalytics.run(`
+            CREATE TABLE IF NOT EXISTS analytics_comments (
+                video_id TEXT UNIQUE
+            )
+        `, (err) => {
+            if (err) {
+                console.error('Error creating table', err);
+            } else {
+                console.log('Table "analytics_comments" is ready');
             }
         });
     }
 });
 
-export function updateAnalytics(data: { [s: string]: unknown; } | ArrayLike<unknown>, channelId: any, callback: (arg0: Error) => void) {
-    const currentTime = Math.floor(Date.now() / 1000);
-    const columnName = `views_${currentTime}`;
+export function dbAnalyticsInsertAnalytics(data: { videos: { [videoId: string]: { views: number; likes: number; comments: number; timePublished: number }; }; }) {
+    const d = new Date();
+    const timestamp = (Math.floor(d.getTime() / 1000) - (d.getUTCSeconds())) * 1000
+    const columnName = "t_" + timestamp.toString()
 
-    dbAnalytics.serialize(() => {
-        dbAnalytics.run(`
-            ALTER TABLE analytics ADD COLUMN IF NOT EXISTS ${columnName} INTEGER DEFAULT 0
-        `, (err) => {
+    // Add a new column for the timestamp in each table
+    const addColumnQueries = [
+        `ALTER TABLE analytics_views ADD COLUMN ${columnName} INTEGER DEFAULT 0;`,
+        `ALTER TABLE analytics_likes ADD COLUMN ${columnName} INTEGER DEFAULT 0;`,
+        `ALTER TABLE analytics_comments ADD COLUMN ${columnName} INTEGER DEFAULT 0;`
+    ];
+
+    // Add columns
+    addColumnQueries.forEach(query => {
+        dbAnalytics.exec(query, (err: any) => {
             if (err) {
-                console.error('Error adding new column', err);
-                return callback(err);
+                console.error(`Error adding column ${columnName}`, err);
+            } else {
+                console.log(`Column ${columnName} added`);
             }
+        });
+    });
 
-            const updateStatement = dbAnalytics.prepare(`
-                INSERT INTO analytics (video_id, channel_id, ${columnName}) VALUES (?, ?, ?)
-                ON CONFLICT(video_id) DO UPDATE SET ${columnName} = excluded.${columnName}
-            `);
+    // Insert or update data into respective tables
+    for (const videoId in data.videos) {
+        const { views, likes, comments, timePublished } = data.videos[videoId];
 
-            for (const [videoId, views] of Object.entries(data)) {
-                updateStatement.run(videoId, channelId, views, (err: any) => {
-                    if (err) {
-                        console.error('Error updating/inserting views', err);
-                    }
-                });
+        // Insert or update views
+        dbAnalytics.run(`
+            INSERT INTO analytics_views (video_id, time_published, ${columnName})
+            VALUES (?, ?, ?)
+            ON CONFLICT(video_id) DO UPDATE SET ${columnName} = ${columnName} + excluded.${columnName}
+        `, [videoId, timePublished, views], (err) => {
+            if (err) {
+                console.error(`Error inserting/updating views for video_id: ${videoId}`, err);
             }
+        });
 
-            updateStatement.finalize((err) => {
-                if (err) {
-                    console.error('Error finalizing statement', err);
-                }
-                callback(err);
-            });
+        // Insert or update likes
+        dbAnalytics.run(`
+            INSERT INTO analytics_likes (video_id, ${columnName})
+            VALUES (?, ?)
+            ON CONFLICT(video_id) DO UPDATE SET ${columnName} = ${columnName} + excluded.${columnName}
+        `, [videoId, likes], (err) => {
+            if (err) {
+                console.error(`Error inserting/updating likes for video_id: ${videoId}`, err);
+            }
+        });
+
+        // Insert or update comments
+        dbAnalytics.run(`
+            INSERT INTO analytics_comments (video_id, ${columnName})
+            VALUES (?, ?)
+            ON CONFLICT(video_id) DO UPDATE SET ${columnName} = ${columnName} + excluded.${columnName}
+        `, [videoId, comments], (err) => {
+            if (err) {
+                console.error(`Error inserting/updating comments for video_id: ${videoId}`, err);
+            }
+        });
+    }
+}
+
+export async function dbAnalyticsInsertVideosToTrack(videos: {videoId: string, videoPublishedAt: number}[], channelId: string) {
+    videos.forEach(({ videoId, videoPublishedAt }) => {
+        dbAnalytics.run(`
+            INSERT INTO analytics_views (video_id, channel_id, time_published) VALUES (?, ?, ?)
+        `, [videoId, channelId, videoPublishedAt], (err) => {
+            if (err) {
+                console.error(`Error inserting new video IDs into the analytics database: ${err}`)
+            }
+        });
+    });
+}
+
+export async function dbAnalyticsGetIds() {
+    return new Promise((resolve, reject) => {
+        dbAnalytics.all('SELECT video_id FROM analytics_views', (err, rows) => {
+            if (err) {
+                return reject(`Error fetching video IDs: ${err}`);
+            }
+            const videoIds = rows.map((row: any) => row.video_id);
+            const batches = [];
+            for (let i = 0; i < videoIds.length; i += 50) {
+                batches.push(videoIds.slice(i, i + 50).join(','));
+            }
+            resolve(batches);
         });
     });
 }
