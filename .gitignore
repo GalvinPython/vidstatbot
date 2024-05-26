@@ -1,1 +1,8 @@
 node_modules/
+.env
+db/
+
+# Ignore the config.ts file in the root folder
+# but allow the validator to be tracked
+config.ts
+!src/validators/config.ts

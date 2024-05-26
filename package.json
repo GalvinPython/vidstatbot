@@ -3,9 +3,26 @@
   "module": "index.ts",
   "type": "module",
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/eslint__js": "^8.42.3"
+  },
+  "scripts": {
+    "dev": "bun run src/index.ts --dev",
+    "start": "bun run src/index.ts",
+    "lint": "echo Checking linting... &&bunx eslint . && echo All good!",
+    "updateVersion": "echo Getting version... && "
   },
   "peerDependencies": {
     "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "cron": "^3.1.7",
+    "discord-api-types": "^0.37.85",
+    "discord.js": "^14.15.2",
+    "eslint": "^9.3.0",
+    "sqlite3": "^5.1.7",
+    "typescript": "^5.4.5",
+    "typescript-eslint": "^7.10.0",
+    "zod": "^3.23.8"
   }
 }
